@@ -1,5 +1,20 @@
 # Telecom assurance API
 
+## Single-command lab launcher
+
+From the project directory, run:
+
+```bash
+cd ~/telecom-assurance-lab
+./start.sh
+```
+
+The launcher checks prerequisites and the existing namespaces, creates the network lab only when it is incomplete, then starts the SNMP agent, collectors, API, and dashboard. It keeps running and reports each service's status. Press Ctrl+C to stop the processes started by that launcher. Per-service output is saved under `logs/`.
+
+The launcher requires `sudo` for network namespaces and the SNMP agent, Node.js 20.19 or newer with npm, the project `venv`, and installed Python dependencies. It asks for sudo authentication in the current terminal, then restarts its supervisor with elevated access so background SNMP work can start without trying to prompt from a detached process. Collectors, API, and dashboard run as the normal project user. It installs locked frontend packages with `npm ci` on the first run when `web/node_modules` is absent. If no model artifact exists, it attempts training from the current database; with too little data, all other services still start and the UI reports the model as unavailable. Healthy instances of this project's API and dashboard are reused; an unrelated service using either port produces a clear error.
+
+Use `./start.sh --check` to validate dependencies and detect compatible API/dashboard instances without starting or stopping services. If compatible instances are already running, `./start.sh` reuses them and only cleans up processes it started when you press Ctrl+C.
+
 `api.py` serves read-only endpoints backed by the existing `metrics.db` in this directory. It opens SQLite with `mode=ro`, does not create tables, and does not change historical rows. It expects the existing `metrics`, `qos_metrics`, and `sla_events` tables.
 
 The `/restconf/data/telecom:*` paths use RESTCONF-compatible resource naming and YANG-inspired JSON. They are not a claim of full RFC 8040 compliance.

@@ -4,8 +4,8 @@ export type QoS = {
   target_ip: string
   packets_sent: number
   packets_received: number
-  packet_loss_pct: number
-  latency_avg_ms: number
+  packet_loss_pct: number | null
+  latency_avg_ms: number | null
   sla_status: string
   breach_reason: string | null
 }

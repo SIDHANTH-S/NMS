@@ -30,7 +30,10 @@ INTERFACES = {
 
 
 def initialize_database():
-    conn = sqlite3.connect(DB_FILE)
+    # The QoS monitor writes to the same SQLite file; wait for its short
+    # transaction instead of terminating the collector on a lock.
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS metrics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

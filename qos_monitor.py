@@ -13,7 +13,10 @@ INTERVAL_SECONDS = 10
 
 
 def initialize_database():
-    conn = sqlite3.connect(DB_FILE)
+    # The SNMP collector writes to the same SQLite file; wait for its short
+    # transaction instead of failing a monitoring cycle on contention.
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS qos_metrics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
