@@ -2,8 +2,8 @@ export type QoS = {
   id: number
   timestamp: string
   target_ip: string
-  packets_sent: number
-  packets_received: number
+  packets_sent: number | null
+  packets_received: number | null
   packet_loss_pct: number | null
   latency_avg_ms: number | null
   sla_status: string

@@ -67,6 +67,11 @@ def build_examples(
     for index, row in enumerate(ordered_qos):
         if index + HORIZON_SAMPLES >= len(ordered_qos):
             break
+        if row.get("sla_status") not in {"NORMAL", "BREACH"}:
+            continue
+        future = ordered_qos[index + 1:index + 1 + HORIZON_SAMPLES]
+        if any(item.get("sla_status") not in {"NORMAL", "BREACH"} for item in future):
+            continue
         current_time = _epoch(row["timestamp"])
         latency_window = [item["latency_avg_ms"] for item in ordered_qos[max(0, index - 4):index + 1]]
         latency_values = [float(value) for value in latency_window if value is not None]
@@ -101,7 +106,6 @@ def build_examples(
             feature[f"{interface}_rx_mbps"] = float(sample["rx_mbps"]) if sample and sample["rx_mbps"] is not None else np.nan
             feature[f"{interface}_tx_mbps"] = float(sample["tx_mbps"]) if sample and sample["tx_mbps"] is not None else np.nan
 
-        future = ordered_qos[index + 1:index + 1 + HORIZON_SAMPLES]
         labels.append(int(any(item["sla_status"] == "BREACH" for item in future)))
         features.append(feature)
         metadata.append({"id": row["id"], "timestamp": row["timestamp"], "status": row["sla_status"]})
@@ -179,16 +183,35 @@ def predict_latest() -> dict[str, Any]:
     qos, traffic = load_history()
     if not qos:
         return {"available": False, "reason": "No QoS measurements are available."}
+    latest_row = qos[-1]
+    try:
+        age_seconds = datetime.now(timezone.utc).timestamp() - _epoch(latest_row["timestamp"])
+    except (TypeError, ValueError):
+        return {"available": False, "reason": "Latest QoS timestamp is invalid.", "experimental": True}
+    if age_seconds < -5 or age_seconds > MAX_METRIC_AGE_SECONDS:
+        return {"available": False, "reason": "Latest QoS measurement is stale.", "experimental": True}
+    if latest_row.get("sla_status") != "NORMAL":
+        return {"available": False, "reason": "Prediction is unavailable unless the latest QoS probe is NORMAL.", "experimental": True}
+    if (
+        latest_row.get("latency_avg_ms") is None
+        or latest_row.get("packet_loss_pct") is None
+        or not latest_row.get("packets_sent")
+        or latest_row.get("packets_received") is None
+    ):
+        return {"available": False, "reason": "Latest QoS measurement is incomplete.", "experimental": True}
     artifact = joblib.load(MODEL_PATH)
     features, _, _ = build_examples(qos, traffic)
     # build_examples omits the last three rows because they have no future label.
     # Build current features by appending unlabeled copies and reusing the same past-only logic.
     extended = qos + [dict(qos[-1], id=qos[-1]["id"] + i + 1, timestamp=qos[-1]["timestamp"], sla_status="NORMAL") for i in range(HORIZON_SAMPLES)]
-    current_features, _, _ = build_examples(extended, traffic)
-    latest = current_features[len(qos) - 1]
+    current_features, _, current_metadata = build_examples(extended, traffic)
+    latest_position = next((i for i, item in enumerate(current_metadata) if item["id"] == latest_row["id"]), None)
+    if latest_position is None:
+        return {"available": False, "reason": "Latest QoS sample cannot be used for prediction.", "experimental": True}
+    latest = current_features[latest_position]
     latest_vector = np.asarray([[latest[name] for name in FEATURES]], dtype=float)
     score = float(artifact["model"].predict_proba(latest_vector)[0][1])
-    latest_id = qos[-1]["id"]
+    latest_id = latest_row["id"]
     return {
         "available": True,
         "risk_score_pct": round(score * 100, 1),

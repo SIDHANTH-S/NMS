@@ -2,6 +2,7 @@ import asyncio
 import sqlite3
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from pysnmp.hlapi.v3arch.asyncio import (
     SnmpEngine,
@@ -15,7 +16,9 @@ from pysnmp.hlapi.v3arch.asyncio import (
 
 ROUTER_IP = "10.10.1.1"
 COMMUNITY = "public"
-DB_FILE = "metrics.db"
+DB_FILE = Path(__file__).resolve().with_name("metrics.db")
+DB_BUSY_TIMEOUT_MS = 3000
+DB_WRITE_ATTEMPTS = 6
 
 INTERFACES = {
     "r0": {
@@ -32,8 +35,8 @@ INTERFACES = {
 def initialize_database():
     # The QoS monitor writes to the same SQLite file; wait for its short
     # transaction instead of terminating the collector on a lock.
-    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    conn.execute("PRAGMA busy_timeout = 30000")
+    conn = sqlite3.connect(DB_FILE, timeout=DB_BUSY_TIMEOUT_MS / 1000)
+    conn.execute(f"PRAGMA busy_timeout = {DB_BUSY_TIMEOUT_MS}")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS metrics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +50,35 @@ def initialize_database():
     """)
     conn.commit()
     return conn
+
+
+async def write_with_retry(conn, records):
+    """Persist a complete collection cycle in a short, bounded transaction."""
+    delay = 0.1
+    for attempt in range(DB_WRITE_ATTEMPTS):
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany("""
+                INSERT INTO metrics
+                (timestamp, interface, rx_bytes, tx_bytes, rx_mbps, tx_mbps)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, records)
+            conn.commit()
+            return
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            code = getattr(exc, "sqlite_errorcode", None)
+            busy_codes = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+            if code not in busy_codes and not any(word in str(exc).lower() for word in ("database is locked", "database is busy")):
+                raise
+            if attempt + 1 == DB_WRITE_ATTEMPTS:
+                raise
+            print(f"SQLite is busy; retry {attempt + 1}/{DB_WRITE_ATTEMPTS - 1} in {delay:.1f}s")
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 1.6)
+        except Exception:
+            conn.rollback()
+            raise
 
 
 async def get_counter(engine, target, oid):
@@ -86,6 +118,7 @@ async def main():
             cycle_start = time.monotonic()
             timestamp = datetime.now(timezone.utc).isoformat()
 
+            records = []
             for interface, oids in INTERFACES.items():
                 rx = await get_counter(engine, target, oids["rx"])
                 tx = await get_counter(engine, target, oids["tx"])
@@ -105,12 +138,7 @@ async def main():
                         rx_mbps = rx_delta * 8 / elapsed / 1_000_000
                         tx_mbps = tx_delta * 8 / elapsed / 1_000_000
 
-                conn.execute("""
-                    INSERT INTO metrics
-                    (timestamp, interface, rx_bytes, tx_bytes,
-                     rx_mbps, tx_mbps)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (timestamp, interface, rx, tx, rx_mbps, tx_mbps))
+                records.append((timestamp, interface, rx, tx, rx_mbps, tx_mbps))
 
                 print(
                     f"{interface} | RX: {rx_mbps if rx_mbps is not None else 'Initial'} "
@@ -119,7 +147,7 @@ async def main():
 
                 previous[interface] = (rx, tx)
 
-            conn.commit()
+            await write_with_retry(conn, records)
             previous_time = cycle_start
 
             print(f"Saved measurements at {timestamp}\n")
@@ -138,3 +166,4 @@ if __name__ == "__main__":
         print("\nCollector stopped.")
     except Exception as exc:
         print(f"\nCollector error: {exc}")
+        raise SystemExit(1) from exc

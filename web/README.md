@@ -1,42 +1,35 @@
-# AssureNet dashboard
+# ASSURENET dashboard
 
-React, Vite, TypeScript, and Recharts frontend for the telecom assurance lab.
-It reads live data from `api.py`; it does not create monitoring data.
+React, Vite, TypeScript, and Recharts frontend for the telecom assurance lab. It reads real monitoring data from FastAPI and does not create monitoring data.
 
 ## Start on Kali
 
-Install Node.js 20.19+ and npm if they are not already present:
-
-```bash
-sudo apt update
-sudo apt install -y nodejs npm
-```
-
-Then, in separate terminals:
+Use the project launcher to start the network lab, collectors, API, and dashboard together:
 
 ```bash
 cd ~/telecom-assurance-lab
-source venv/bin/activate
-python -m uvicorn api:app --host 0.0.0.0 --port 8000
+./start.sh
 ```
 
-```bash
-cd ~/telecom-assurance-lab/web
-npm install
-npm run dev -- --host 0.0.0.0
-```
+The dashboard is available inside Kali Firefox at <http://localhost:5173>. FastAPI runs on Kali loopback at port 8000. Vite forwards `/api/*` and `/restconf/*` requests to FastAPI, so browser requests stay on the dashboard origin and do not need a separate API tunnel or permissive CORS settings.
 
-Open `http://127.0.0.1:5173`. If the browser runs on the Windows host, forward both Kali ports from PowerShell with:
+## Open from Windows
+
+After `./start.sh` is running in Kali, paste the command printed by the launcher into Windows PowerShell:
 
 ```powershell
-ssh -N -L 5173:127.0.0.1:5173 -L 8000:127.0.0.1:8000 -p 2222 kali@127.0.0.1
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519" `
+  -L 5173:127.0.0.1:5173 `
+  kali@127.0.0.1 -p 2222
 ```
 
-Then open `http://127.0.0.1:5173` on Windows. Keep the SSH forwarding window open.
+Keep the PowerShell SSH session open while using the dashboard. Then open <http://localhost:5173> in Chrome or Edge. The dashboard's API requests go through Vite over this same tunnel.
 
-## Configure the API address
+For optional direct FastAPI documentation from Windows, add `-L 8001:127.0.0.1:8000` to the SSH command and open <http://localhost:8001/docs>. The dashboard itself does not use port 8001.
 
-The default is `http://127.0.0.1:8000`, which works from a local browser and with the SSH port forwarding above. To use a different address, copy `.env.example` to `.env.local` and set `VITE_API_BASE_URL` to the browser-reachable FastAPI origin. That origin must be allowed by the API CORS configuration in `api.py`.
+## Development proxy
+
+The frontend uses relative API paths. `vite.config.ts` proxies `/api` and `/restconf` to `http://127.0.0.1:8000` from within Kali. Do not set a browser-facing API host for the dashboard; this keeps Kali Firefox and Windows browsers on the same configuration.
 
 ## Data behavior
 
