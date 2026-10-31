@@ -53,3 +53,15 @@ export type ServicesResource = {
 }
 
 export type ListResponse<T> = { count: number; limit: number; data: T[] }
+
+export type Prediction = {
+  available: boolean
+  reason?: string
+  risk_score_pct?: number
+  horizon_samples?: number
+  current_sla_status?: string
+  latest_sample_timestamp?: string
+  new_samples_since_training?: number
+  score_type?: string
+  experimental?: boolean
+}

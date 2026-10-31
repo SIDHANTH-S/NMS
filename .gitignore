@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .env
 *.log
+qos_risk_model.joblib
+qos_model_report.json

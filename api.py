@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from predictor import predict_latest
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -108,6 +109,12 @@ def qos_history(
     """Return recent QoS samples for latency and packet-loss charts."""
     rows = _many("SELECT * FROM qos_metrics ORDER BY id DESC LIMIT ?", (limit,))
     return {"count": len(rows), "limit": limit, "data": rows}
+
+
+@app.get("/api/v1/prediction/early-warning")
+def early_warning() -> dict[str, Any]:
+    """Return an experimental Scikit-learn forecast when a model is trained."""
+    return predict_latest()
 
 
 @app.get("/api/v1/metrics/history")

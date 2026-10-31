@@ -9,7 +9,7 @@ import {
   Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
 } from 'recharts'
-import type { Event, InterfacesResource, ListResponse, Metric, QoS, ServicesResource, SystemStatus } from './types'
+import type { Event, InterfacesResource, ListResponse, Metric, Prediction, QoS, ServicesResource, SystemStatus } from './types'
 
 const API = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 const REFRESH_MS = 5_000
@@ -23,6 +23,7 @@ type DashboardData = {
   events: Event[]
   interfaces: Metric[]
   service: ServicesResource['telecom:services']['service'][number] | null
+  prediction: Prediction
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -32,7 +33,7 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function loadDashboard(): Promise<DashboardData> {
-  const [system, latest, qosHistory, metrics, events, interfaces, services] = await Promise.all([
+  const [system, latest, qosHistory, metrics, events, interfaces, services, prediction] = await Promise.all([
     get<SystemStatus>('/api/v1/system'),
     get<{ data: QoS | null }>('/api/v1/qos/latest'),
     get<ListResponse<QoS>>('/api/v1/qos/history?limit=100'),
@@ -40,6 +41,7 @@ async function loadDashboard(): Promise<DashboardData> {
     get<ListResponse<Event>>('/api/v1/sla/events?limit=100'),
     get<InterfacesResource>('/restconf/data/telecom:interfaces'),
     get<ServicesResource>('/restconf/data/telecom:services'),
+    get<Prediction>('/api/v1/prediction/early-warning'),
   ])
   return {
     system,
@@ -49,6 +51,7 @@ async function loadDashboard(): Promise<DashboardData> {
     events: events.data,
     interfaces: interfaces['telecom:interfaces'].interface,
     service: services['telecom:services'].service[0] ?? null,
+    prediction,
   }
 }
 
@@ -161,11 +164,12 @@ function Overview({ data, activeEvents, totalThroughput, avgLatency, avgLoss, is
   return <>
     <div className={`health-banner ${!qosFresh ? 'health-unknown' : isBreach ? 'health-breach' : 'health-normal'}`}><div className="health-icon">{!qosFresh ? <CircleHelp size={19} /> : isBreach ? <AlertTriangle size={19} /> : <Check size={19} />}</div><div className="health-copy"><span>NETWORK HEALTH</span><strong>{healthLabel}</strong><small>{data.qos ? `Last probe to ${data.qos.target_ip} · ${timeAgo(data.qos.timestamp)}` : 'QoS monitor has not reported a measurement yet'}</small></div><div className="health-meta"><span className="status-chip">{healthStatus}</span><span>{activeEvents.length} open incident{activeEvents.length === 1 ? '' : 's'}</span></div></div>
 
-    <div className="kpi-grid">
+    <div className="kpi-grid overview-kpis">
       <KpiCard icon={<Activity size={17} />} label="AVG. LATENCY" value={avgLatency === null ? '—' : `${avgLatency.toFixed(2)} ms`} detail="Recent QoS samples" accent="cyan" />
       <KpiCard icon={<Wifi size={17} />} label="AVG. PACKET LOSS" value={avgLoss === null ? '—' : `${avgLoss.toFixed(2)}%`} detail={data.qos ? `Latest ${data.qos.packet_loss_pct.toFixed(2)}%` : 'No QoS samples'} accent="violet" />
       <KpiCard icon={<ArrowDownToLine size={17} />} label="TOTAL THROUGHPUT" value={`${formatRate(totalThroughput)} Mbps`} detail="RX + TX across router links" accent="blue" />
       <KpiCard icon={<AlertTriangle size={17} />} label="OPEN SLA INCIDENTS" value={String(activeEvents.length).padStart(2, '0')} detail={activeEvents.length ? 'Requires attention' : 'No active incidents'} accent={activeEvents.length ? 'red' : 'green'} />
+      <KpiCard icon={<Activity size={17} />} label="AI EARLY WARNING" value={data.prediction.available ? `${data.prediction.risk_score_pct}%` : '—'} detail={data.prediction.available ? !qosFresh ? 'Last QoS sample is stale · experimental score' : `Next ${data.prediction.horizon_samples} samples · experimental` : data.prediction.reason ?? 'Model unavailable'} accent="violet" />
     </div>
 
     <div className="section-grid overview-grid">

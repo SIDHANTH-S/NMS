@@ -21,6 +21,7 @@ The API binds to all Kali interfaces so a dashboard or host browser can reach it
 - `GET /api/v1/system` — API/database availability, latest QoS and traffic timestamps, and the latest open SLA event.
 - `GET /api/v1/qos/latest` — latest QoS row, or `{"data": null}` when empty.
 - `GET /api/v1/qos/history?limit=100` — newest QoS samples for latency and packet-loss charts. `limit` is 1–1000.
+- `GET /api/v1/prediction/early-warning` — experimental model score for an SLA breach within the next three QoS samples. Returns `available: false` until the model has been trained.
 - `GET /api/v1/metrics/history?limit=100&interface=r1` — newest traffic rows. `limit` is 1–1000; `interface` is optional.
 - `GET /api/v1/sla/events?limit=100&status=OPEN` — newest incident rows. `limit` is 1–1000; `status` is optional.
 - `GET /restconf/data/telecom:interfaces` — latest traffic row for each interface in a YANG-inspired wrapper.
@@ -43,3 +44,15 @@ curl -i http://127.0.0.1:8000/restconf/data/telecom:services
 ```
 
 OpenAPI docs are available at `http://127.0.0.1:8000/docs` while the server runs.
+
+## Experimental QoS early warning
+
+The prediction model uses rolling latency/loss features plus recent r0/r1 SNMP rates. Its label is a breach in any of the next three QoS samples. Train it from the existing history without changing the database:
+
+```bash
+cd ~/telecom-assurance-lab
+source venv/bin/activate
+python train_qos_model.py
+```
+
+The script reports a chronological 80/20 holdout and writes an ignored model artifact. The score is experimental and uncalibrated; the model report identifies when the time-ordered holdout has no breach examples. Collect more normal and impaired scenarios before treating its score as an operational warning.
